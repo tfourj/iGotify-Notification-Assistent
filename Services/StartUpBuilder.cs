@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace iGotify_Notification_Assist.Services;
 
 public class StartUpBuilder : IStartupFilter
@@ -6,6 +8,13 @@ public class StartUpBuilder : IStartupFilter
     {
         return builder =>
         {
+            // Log version on startup
+            var version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "Unknown";
+            Console.WriteLine($"========================================");
+            Console.WriteLine($"iGotify Notification Assist");
+            Console.WriteLine($"Version: {version}");
+            Console.WriteLine($"========================================");
+            
             // Create GotifyInstance after starting of the API
             var gss = GotifySocketService.getInstance();
             gss.Init();
