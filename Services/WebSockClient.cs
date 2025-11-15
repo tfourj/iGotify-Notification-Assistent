@@ -97,28 +97,106 @@ public class WebSockClient
         // Listening to the WebSocket when message received
         ws.MessageReceived.Select(msg => Observable.FromAsync(async () =>
             {
-                //Console.WriteLine($"Message received: {msg}");
-                // Convert the payload from gotify and replace values because so we can cast it better cast it to an object
-                var message = msg.ToString().Replace("client::display", "clientdisplay")
-                    .Replace("client::notification", "clientnotification")
-                    .Replace("android::action", "androidaction");
-                if (Environments.isLogEnabled)
-                    Console.WriteLine("Message converted: " + message);
-                // var jsonData = JsonConvert.SerializeObject(message);
-                var gm = JsonConvert.DeserializeObject<GotifyMessage>(message);
-                // If object is null return and listen to the next message
-                if (gm == null)
+                try
                 {
-                    Console.WriteLine("GotifyMessage is null");
-                    return;
-                }
+                    //Console.WriteLine($"Message received: {msg}");
+                    
+                    // Validate message is not null or empty
+                    var rawMessage = msg?.ToString();
+                    if (string.IsNullOrWhiteSpace(rawMessage))
+                    {
+                        Console.WriteLine($"Warning: Received null or empty message from WebSocket client: {ws.Name}");
+                        return;
+                    }
 
-                // Go and send the message 
-                Console.WriteLine($"WS Instance from: {ws.Name}");
-                await new DeviceModel().SendNotifications(gm, ws);
+                    // Convert the payload from gotify and replace values because so we can cast it better cast it to an object
+                    var message = rawMessage.Replace("client::display", "clientdisplay")
+                        .Replace("client::notification", "clientnotification")
+                        .Replace("android::action", "androidaction");
+                    
+                    if (Environments.isLogEnabled)
+                        Console.WriteLine("Message converted: " + message);
+                    
+                    // Validate JSON string is not empty after replacement
+                    if (string.IsNullOrWhiteSpace(message))
+                    {
+                        Console.WriteLine($"Warning: Message is empty after string replacement. Raw message: {rawMessage}");
+                        return;
+                    }
+
+                    // Deserialize JSON message
+                    GotifyMessage? gm;
+                    try
+                    {
+                        gm = JsonConvert.DeserializeObject<GotifyMessage>(message);
+                    }
+                    catch (JsonException jsonEx)
+                    {
+                        Console.WriteLine($"Error: Failed to deserialize GotifyMessage from WebSocket client: {ws.Name}");
+                        Console.WriteLine($"JSON Exception: {jsonEx.Message}");
+                        Console.WriteLine($"Raw message: {rawMessage}");
+                        Console.WriteLine($"Converted message: {message}");
+                        if (Environments.isLogEnabled)
+                            Console.WriteLine($"Stack trace: {jsonEx.StackTrace}");
+                        return;
+                    }
+
+                    // If object is null return and listen to the next message
+                    if (gm == null)
+                    {
+                        Console.WriteLine($"Warning: GotifyMessage deserialized to null from WebSocket client: {ws.Name}");
+                        Console.WriteLine($"Message content: {message}");
+                        return;
+                    }
+
+                    // Go and send the message 
+                    Console.WriteLine($"WS Instance from: {ws.Name}");
+                    try
+                    {
+                        await new DeviceModel().SendNotifications(gm, ws);
+                    }
+                    catch (Exception sendEx)
+                    {
+                        Console.WriteLine($"Error: Failed to send notification from WebSocket client: {ws.Name}");
+                        Console.WriteLine($"Send Exception: {sendEx.Message}");
+                        Console.WriteLine($"Message ID: {gm.id}, Title: {gm.title}");
+                        if (Environments.isLogEnabled)
+                            Console.WriteLine($"Stack trace: {sendEx.StackTrace}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error: Unexpected exception while processing message from WebSocket client: {ws.Name}");
+                    Console.WriteLine($"Exception: {ex.Message}");
+                    Console.WriteLine($"Exception Type: {ex.GetType().Name}");
+                    if (Environments.isLogEnabled)
+                    {
+                        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                        if (ex.InnerException != null)
+                        {
+                            Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
+                        }
+                    }
+                }
             }))
             .Concat() // executes sequentially
-            .Subscribe();
+            .Subscribe(
+                onNext: _ => { }, // No action needed on successful completion
+                onError: ex =>
+                {
+                    Console.WriteLine($"Error: Observable chain error in WebSocket client: {ws.Name}");
+                    Console.WriteLine($"Exception: {ex.Message}");
+                    Console.WriteLine($"Exception Type: {ex.GetType().Name}");
+                    if (Environments.isLogEnabled)
+                    {
+                        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                        if (ex.InnerException != null)
+                        {
+                            Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
+                        }
+                    }
+                }
+            );
 
         ws.Start();
 
