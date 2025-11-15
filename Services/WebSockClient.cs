@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Reactive.Linq;
 using iGotify_Notification_Assist.Models;
@@ -147,6 +148,57 @@ public class WebSockClient
                         Console.WriteLine($"Warning: GotifyMessage deserialized to null from WebSocket client: {ws.Name}");
                         Console.WriteLine($"Message content: {message}");
                         return;
+                    }
+
+                    // Validate that message content is not empty, if empty try to fetch from API
+                    if (string.IsNullOrWhiteSpace(gm.message))
+                    {
+                        Console.WriteLine($"Warning: GotifyMessage has empty message content from WebSocket client: {ws.Name}");
+                        Console.WriteLine($"Message ID: {gm.id}, Title: {gm.title ?? "null"}");
+                        Console.WriteLine($"Attempting to fetch message from Gotify API...");
+                        
+                        try
+                        {
+                            // Extract Gotify server URL from WebSocket URL
+                            var protocol = ws.Url.ToString().Contains("ws://") ? "http://" : "https://";
+                            var gotifyServerUrl = ws.Url.ToString().Replace("ws://", "").Replace("wss://", "").Replace("\"", "")
+                                .Split("/stream")[0];
+                            var apiUrl = $"{protocol}{gotifyServerUrl}/message/{gm.id}?token={ws.Name}";
+                            
+                            using var httpClient = new HttpClient();
+                            httpClient.Timeout = TimeSpan.FromSeconds(10);
+                            
+                            var response = await httpClient.GetAsync(apiUrl);
+                            if (response.IsSuccessStatusCode)
+                            {
+                                var jsonResponse = await response.Content.ReadAsStringAsync();
+                                var fetchedMessage = JsonConvert.DeserializeObject<GotifyMessage>(jsonResponse);
+                                
+                                if (fetchedMessage != null && !string.IsNullOrWhiteSpace(fetchedMessage.message))
+                                {
+                                    gm.message = fetchedMessage.message;
+                                    Console.WriteLine($"Successfully fetched message from API for Message ID: {gm.id}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"Warning: Fetched message from API is still empty for Message ID: {gm.id}");
+                                    return;
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Error: Failed to fetch message from API. Status: {response.StatusCode}, Message ID: {gm.id}");
+                                return;
+                            }
+                        }
+                        catch (Exception fetchEx)
+                        {
+                            Console.WriteLine($"Error: Exception while fetching message from API for Message ID: {gm.id}");
+                            Console.WriteLine($"Fetch Exception: {fetchEx.Message}");
+                            if (Environments.isLogEnabled)
+                                Console.WriteLine($"Stack trace: {fetchEx.StackTrace}");
+                            return;
+                        }
                     }
 
                     // Go and send the message 
